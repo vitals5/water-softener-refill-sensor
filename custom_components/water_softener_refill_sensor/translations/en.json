@@ -1,0 +1,221 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "Set up water softener",
+        "description": "Counts regenerations via smart plug power and energy metrics and tracks salt levels.",
+        "data": {
+          "name": "Name",
+          "power_entity": "Power sensor (instantaneous W)",
+          "energy_entity": "Energy sensor (cumulative kWh)",
+          "power_threshold_w": "Power threshold",
+          "energy_threshold_kwh": "Energy threshold",
+          "detection_mode": "Detection mode",
+          "capacity_kg": "Brine tank capacity (salt)",
+          "per_regen_kg": "Salt used per regeneration",
+          "initial_stock_kg": "Current salt stock",
+          "window_start_hour": "Time window from (hour)",
+          "window_end_hour": "Time window to (hour)",
+          "warn_remaining": "Warn at remaining stock of (regenerations)"
+        },
+        "data_description": {
+          "power_entity": "Sensor reporting active power in Watts [W] from your smart plug.",
+          "energy_entity": "Sensor reporting cumulative energy consumption in kWh or Wh from your smart plug.",
+          "power_threshold_w": "Power in Watts [W] above which the regeneration motor is considered active.",
+          "energy_threshold_kwh": "Energy in kWh consumed in the time window required to detect a regeneration.",
+          "detection_mode": "Criterion to identify a regeneration: energy, power, both, or either.",
+          "capacity_kg": "How many kilograms of salt fit into the brine tank?",
+          "per_regen_kg": "How many kilograms of salt does one regeneration cycle use?",
+          "initial_stock_kg": "Optional. Leave empty if the tank is full right now.",
+          "window_start_hour": "Start of the time window in which the regeneration takes place (default 2 am).",
+          "window_end_hour": "End of the time window (default 3 am). Must be after the start.",
+          "warn_remaining": "From this calculated remaining stock on, a notice is shown until the refill is confirmed."
+        }
+      }
+    },
+    "error": {
+      "window_invalid": "The end of the time window must be after its start.",
+      "per_regen_too_large": "Salt per regeneration must not exceed the tank capacity.",
+      "stock_too_large": "The current salt stock must not exceed the tank capacity.",
+      "power_threshold_invalid": "Power threshold must be greater than 0.",
+      "energy_threshold_invalid": "Energy threshold must be greater than 0."
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "Water softener settings",
+        "data": {
+          "power_entity": "Power sensor (instantaneous W)",
+          "energy_entity": "Energy sensor (cumulative kWh)",
+          "power_threshold_w": "Power threshold",
+          "energy_threshold_kwh": "Energy threshold",
+          "detection_mode": "Detection mode",
+          "capacity_kg": "Brine tank capacity (salt)",
+          "per_regen_kg": "Salt used per regeneration",
+          "window_start_hour": "Time window from (hour)",
+          "window_end_hour": "Time window to (hour)",
+          "warn_remaining": "Warn at remaining stock of (regenerations)"
+        }
+      }
+    },
+    "error": {
+      "window_invalid": "The end of the time window must be after its start.",
+      "per_regen_too_large": "Salt per regeneration must not exceed the tank capacity.",
+      "stock_too_large": "The current salt stock must not exceed the tank capacity.",
+      "power_threshold_invalid": "Power threshold must be greater than 0.",
+      "energy_threshold_invalid": "Energy threshold must be greater than 0."
+    }
+  },
+  "selector": {
+    "detection_mode": {
+      "options": {
+        "energy_or_power": "Energy or power threshold (either)",
+        "both": "Both power and energy thresholds",
+        "energy_only": "Energy threshold only",
+        "power_only": "Power threshold only"
+      }
+    }
+  },
+  "entity": {
+    "sensor": {
+      "total_regenerations": {
+        "name": "Regenerations total"
+      },
+      "regenerations_since_refill": {
+        "name": "Regenerations since refill"
+      },
+      "salt_stock": {
+        "name": "Salt stock"
+      },
+      "salt_level": {
+        "name": "Salt level"
+      },
+      "regenerations_left": {
+        "name": "Remaining regenerations"
+      },
+      "last_regeneration": {
+        "name": "Last regeneration"
+      },
+      "last_refill": {
+        "name": "Last refill"
+      },
+      "window_energy": {
+        "name": "Energy use in time window"
+      },
+      "window_max_power": {
+        "name": "Max power in time window"
+      },
+      "current_power": {
+        "name": "Current power"
+      },
+      "next_regeneration_due": {
+        "name": "Next regeneration at the latest"
+      }
+    },
+    "binary_sensor": {
+      "refill_needed": {
+        "name": "Refill salt"
+      },
+      "regeneration_overdue": {
+        "name": "Regeneration overdue"
+      },
+      "regenerating": {
+        "name": "Regeneration active"
+      }
+    },
+    "number": {
+      "refill_amount": {
+        "name": "Salt amount refilled"
+      },
+      "regenerations_since_refill_input": {
+        "name": "Correct regenerations since refill"
+      }
+    },
+    "button": {
+      "confirm_refill": {
+        "name": "Salt refilled"
+      },
+      "confirm_full": {
+        "name": "Tank full"
+      }
+    },
+    "datetime": {
+      "last_regeneration_input": {
+        "name": "Correct last regeneration"
+      }
+    }
+  },
+  "services": {
+    "refill": {
+      "name": "Salt refilled",
+      "description": "Confirms that salt was refilled. The amount in kg is required and is added to the stock (at most up to full). The notice ends once the stock is above the warning threshold again.",
+      "fields": {
+        "config_entry": {
+          "name": "Water softener",
+          "description": "Only needed if several softeners are set up."
+        },
+        "kg": {
+          "name": "Amount refilled",
+          "description": "Amount in kg that was added."
+        }
+      }
+    },
+    "set_salt_stock": {
+      "name": "Set salt stock",
+      "description": "Sets the calculated salt stock to a specific value (e.g. after checking the tank).",
+      "fields": {
+        "config_entry": {
+          "name": "Water softener",
+          "description": "Only needed if several softeners are set up."
+        },
+        "kg": {
+          "name": "Salt stock",
+          "description": "Current stock in kg."
+        }
+      }
+    },
+    "add_regeneration": {
+      "name": "Add regeneration",
+      "description": "Manually adds a regeneration that was not detected (counter and salt stock are adjusted).",
+      "fields": {
+        "config_entry": {
+          "name": "Water softener",
+          "description": "Only needed if several softeners are set up."
+        },
+        "count": {
+          "name": "Count",
+          "description": "Number of regenerations to add."
+        }
+      }
+    },
+    "set_last_regeneration": {
+      "name": "Set last regeneration",
+      "description": "Sets the time of the last regeneration (e.g. from the softener's display). Determines “Next regeneration at the latest” and the “Regeneration overdue” notice. Counters and salt stock stay unchanged.",
+      "fields": {
+        "config_entry": {
+          "name": "Water softener",
+          "description": "Only needed if several softeners are set up."
+        },
+        "datetime": {
+          "name": "Time",
+          "description": "Date and time of the last regeneration (not in the future)."
+        }
+      }
+    },
+    "set_regenerations_since_refill": {
+      "name": "Set regenerations since refill",
+      "description": "Sets the known regenerations since the tank was last filled up. The salt stock is calculated from it: tank capacity minus count × salt used per regeneration.",
+      "fields": {
+        "config_entry": {
+          "name": "Water softener",
+          "description": "Only needed if several softeners are set up."
+        },
+        "count": {
+          "name": "Count",
+          "description": "Regenerations since the tank was last filled up."
+        }
+      }
+    }
+  }
+}

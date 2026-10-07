@@ -1,0 +1,12 @@
+{
+  "domain": "water_softener_refill_sensor",
+  "name": "Water Softener Refill Sensor",
+  "codeowners": ["@vitals5"],
+  "config_flow": true,
+  "documentation": "https://github.com/vitals5/water-softener-refill-sensor",
+  "integration_type": "service",
+  "iot_class": "calculated",
+  "issue_tracker": "https://github.com/vitals5/water-softener-refill-sensor/issues",
+  "requirements": [],
+  "version": "1.0.0"
+}
