@@ -1,3 +1,11 @@
+<p align="center">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="brand/dark_logo.png">
+    <source media="(prefers-color-scheme: light)" srcset="brand/logo.png">
+    <img src="brand/logo.png" alt="Water Softener Refill Sensor" width="480">
+  </picture>
+</p>
+
 # Water Softener Refill Sensor (Smart Plug Edition) for Home Assistant
 
 [![hacs_badge](https://img.shields.io/badge/HACS-Custom-41BDF5.svg)](https://github.com/hacs/default)
@@ -57,8 +65,10 @@ By plugging your water softener into a smart plug (e.g. Shelly, Zigbee plug, Tap
 
 ### Via HACS (Recommended)
 
-1. Ensure [HACS](https://hacs.xyz/) is installed in your Home Assistant.
-2. In Home Assistant, open **HACS** → **Integrations** → Click the three dots (⋮) in the top right → **Custom repositories**.
+[![Open your Home Assistant instance and open a repository inside the Home Assistant Community Store.](https://my.home-assistant.io/badges/hacs_repository.svg)](https://my.home-assistant.io/redirect/hacs_repository/?owner=vitals5&repository=water-softener-refill-sensor&category=integration)
+
+1. Click the **My Home Assistant** badge above, or open **HACS** → **Integrations** in Home Assistant.
+2. Click the three dots (⋮) in the top right → **Custom repositories**.
 3. Enter repository URL:
    ```
    https://github.com/vitals5/water-softener-refill-sensor
