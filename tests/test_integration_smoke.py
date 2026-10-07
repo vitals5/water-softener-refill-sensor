@@ -1,7 +1,7 @@
 """Integration smoke tests using Home Assistant stubs (ha_stubs.py).
 
-Simulates a full night scenario:
-Smart plug power & energy readings -> Regeneration detected -> Salt stock updated -> Low salt alert -> Refill confirmation.
+Simulates:
+Smart plug power & energy readings -> Regeneration detected -> Salt stock updated -> Binary sensors updated -> Refill confirmation.
 """
 from __future__ import annotations
 
@@ -18,7 +18,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 import ha_stubs
 
 ha_stubs.install()
-from ha_stubs import TZ, FakeDt, FakeNotifications, FakeStore
+from ha_stubs import TZ, FakeDt, FakeStore
 
 from custom_components.water_softener_refill_sensor import (
     _manager_for,
@@ -170,6 +170,7 @@ class ConfigFlowHelpers(unittest.TestCase):
         self.assertIsNotNone(schema2)
 
     def test_normalize_and_validate(self) -> None:
+        # Full input with window
         user_input = {
             CONF_NAME: "Weichwasser",
             CONF_POWER_ENTITY: "sensor.plug_power",
@@ -191,7 +192,20 @@ class ConfigFlowHelpers(unittest.TestCase):
         errors = config_flow._validate(normalized)
         self.assertEqual(errors, {})
 
-        # Window invalid
+        # Optional window left empty (full 24h)
+        input_24h = dict(user_input)
+        input_24h[CONF_WINDOW_START] = ""
+        input_24h[CONF_WINDOW_END] = ""
+        norm_24h = config_flow._normalize(input_24h)
+        self.assertIsNone(norm_24h[CONF_WINDOW_START])
+        self.assertIsNone(norm_24h[CONF_WINDOW_END])
+        self.assertEqual(config_flow._validate(norm_24h), {})
+
+        # Window incomplete (only start set)
+        bad_incomplete = dict(norm_24h, **{CONF_WINDOW_START: 2})
+        self.assertEqual(config_flow._validate(bad_incomplete)["base"], "window_incomplete")
+
+        # Window invalid (start >= end)
         bad_window = dict(normalized, **{CONF_WINDOW_START: 4, CONF_WINDOW_END: 3})
         self.assertEqual(config_flow._validate(bad_window)["base"], "window_invalid")
 
@@ -207,8 +221,6 @@ class ConfigFlowHelpers(unittest.TestCase):
 class NightScenario(unittest.TestCase):
     def setUp(self) -> None:
         FakeStore.DATA.clear()
-        FakeNotifications.active.clear()
-        FakeNotifications.log.clear()
 
     def start(self, **entry_kw) -> tuple[FakeHass, FakeEntry]:
         hass = FakeHass()
@@ -218,7 +230,7 @@ class NightScenario(unittest.TestCase):
         hass.states.set("sensor.steckdose_energy", FakeState("50.000", "kWh", local(5, 21)))
         return hass, entry
 
-    def test_full_night_with_low_salt_notification_and_confirmation(self) -> None:
+    def test_full_night_with_low_salt_sensor_and_confirmation(self) -> None:
         hass, entry = self.start()
         asyncio.run(self._night(hass, entry))
 
@@ -228,7 +240,6 @@ class NightScenario(unittest.TestCase):
         mgr = hass.data[DOMAIN]["abc123"]
 
         self.assertEqual(mgr.coordinator.data["regenerations_left"], 4)
-        self.assertEqual(FakeNotifications.active, {})
 
         # Scheduled evaluation at 03:01:00
         self.assertEqual([(h, m, s) for h, m, s, _ in hass.time_cbs], [(3, 1, 0)])
@@ -262,11 +273,6 @@ class NightScenario(unittest.TestCase):
         self.assertEqual(d["regenerations_left"], 3)
         self.assertTrue(d["refill_needed"])
 
-        # Low salt notification created
-        note = FakeNotifications.active["water_softener_refill_sensor_abc123_low_salt"]
-        self.assertIn("3 Regenerationen", note["message"])
-        self.assertIn("13.0 kg von 17.0 kg", note["message"])
-
         # Verify entities
         values = {}
         for desc in sensor_mod.SENSORS:
@@ -297,36 +303,43 @@ class NightScenario(unittest.TestCase):
         await amount.async_set_native_value(2.0)
         await button.async_press()
         self.assertEqual(mgr.coordinator.data["salt_stock_kg"], 15.0)
-        self.assertIn("water_softener_refill_sensor_abc123_low_salt", FakeNotifications.active)
         self.assertTrue(flag.is_on)
 
         # Full refill of 4 kg -> clamped to 17 kg -> warning cleared
         await amount.async_set_native_value(4.0)
         await button.async_press()
-        self.assertEqual(FakeNotifications.active, {})
         self.assertFalse(flag.is_on)
         self.assertEqual(mgr.coordinator.data["salt_stock_kg"], 17.0)
         self.assertEqual(mgr.coordinator.data["regenerations_since_refill"], 0)
 
-    def test_english_notification(self) -> None:
-        hass, entry = self.start()
-        hass.config.language = "en"
-        asyncio.run(self._english(hass, entry))
+    def test_24h_mode_default_setup(self) -> None:
+        # No window_start_hour / window_end_hour specified -> 24h mode!
+        hass, entry = self.start(window_start_hour=None, window_end_hour=None)
+        asyncio.run(self._24h_mode(hass, entry))
 
-    async def _english(self, hass: FakeHass, entry: FakeEntry) -> None:
+    async def _24h_mode(self, hass: FakeHass, entry: FakeEntry) -> None:
         await async_setup(hass, {})
         await async_setup_entry(hass, entry)
         mgr = hass.data[DOMAIN]["abc123"]
 
-        push_power(hass, 15.0, local(6, 2, 20))
-        push_energy(hass, 50.040, local(6, 2, 30))
-        window_end(hass, local(6, 3, 1))
+        self.assertTrue(mgr.settings.is_24h)
+        # Scheduled time check is at 00:01:00
+        self.assertEqual([(h, m, s) for h, m, s, _ in hass.time_cbs], [(0, 1, 0)])
 
-        note = FakeNotifications.active["water_softener_refill_sensor_abc123_low_salt"]
-        self.assertEqual(note["title"], "Refill salt")
-        self.assertIn("3 more regenerations", note["message"])
+        # Regeneration occurs at 15:00
+        push_power(hass, 20.0, local(6, 15, 0))
+        self.assertTrue(mgr.coordinator.data["is_regenerating"])
+        push_energy(hass, 50.040, local(6, 15, 20))
 
-    def test_overdue_notification(self) -> None:
+        # Motor finishes, after cooldown (15:35 > 15:00 + 30m) power returns to standby
+        push_power(hass, 1.2, local(6, 15, 35))
+        self.assertFalse(mgr.coordinator.data["is_regenerating"])
+
+        # Regeneration counted right away!
+        self.assertEqual(mgr.coordinator.data["total_regenerations"], 1)
+        self.assertEqual(mgr.coordinator.data["salt_stock_kg"], 13.0)
+
+    def test_overdue_sensor(self) -> None:
         hass, entry = self.start()
         asyncio.run(self._overdue(hass, entry))
 
@@ -341,7 +354,6 @@ class NightScenario(unittest.TestCase):
         FakeDt._now = local(8, 3, 2)
         window_end(hass, local(8, 3, 2))
 
-        self.assertIn("water_softener_refill_sensor_abc123_overdue", FakeNotifications.active)
         overdue_sensor = bs_mod.RegenerationOverdueBinarySensor(mgr.coordinator, entry)
         self.assertTrue(overdue_sensor.is_on)
 
@@ -423,7 +435,6 @@ class NightScenario(unittest.TestCase):
     def test_catch_up_after_restart(self) -> None:
         hass = FakeHass()
         entry = FakeEntry()
-        # Save a state in store where window had 0.035 kWh usage but was not evaluated
         FakeStore.DATA["water_softener_refill_sensor.abc123"] = {
             "stock_kg": 17.0,
             "total_regens": 0,
@@ -438,7 +449,6 @@ class NightScenario(unittest.TestCase):
             "last_refill_at": None,
             "history": [],
         }
-        # Start HA in the morning at 08:00
         FakeDt._now = local(6, 8, 0)
         asyncio.run(self._catchup(hass, entry))
 
@@ -446,7 +456,6 @@ class NightScenario(unittest.TestCase):
         await async_setup(hass, {})
         await async_setup_entry(hass, entry)
         mgr = hass.data[DOMAIN]["abc123"]
-        # Pending window was finalized on start
         self.assertEqual(mgr.coordinator.data["total_regenerations"], 1)
         self.assertEqual(mgr.coordinator.data["salt_stock_kg"], 13.0)
 

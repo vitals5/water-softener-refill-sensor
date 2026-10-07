@@ -1,11 +1,10 @@
-"""Manager for water softener tracking: monitors power and energy, persists state, manages notifications."""
+"""Manager for water softener tracking: monitors power and energy, persists state, updates entities."""
 from __future__ import annotations
 
 import logging
 from datetime import datetime
 from typing import Any, Callable
 
-from homeassistant.components import persistent_notification
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import STATE_UNAVAILABLE, STATE_UNKNOWN
 from homeassistant.core import Event, HomeAssistant, State, callback
@@ -33,13 +32,9 @@ from .const import (
     DEFAULT_PER_REGEN_KG,
     DEFAULT_POWER_THRESHOLD_W,
     DEFAULT_WARN_REMAINING,
-    DEFAULT_WINDOW_END,
-    DEFAULT_WINDOW_START,
     DOMAIN,
     SAVE_DELAY,
     STORAGE_VERSION,
-    notification_id,
-    overdue_notification_id,
     storage_key,
 )
 from .logic import EVAL_DELAY, Settings, SoftenerModel
@@ -63,62 +58,23 @@ UNIT_TO_W = {
     "mw": 0.001,
 }
 
-MESSAGES = {
-    "de": {
-        "title": "Salz nachfüllen",
-        "message": (
-            "Der rechnerische Salzvorrat der Enthärtungsanlage „{name}“ reicht nur noch für {left} {unit} "
-            "({stock} kg von {capacity} kg).\n\n"
-            "Bitte Salz nachfüllen und die nachgefüllte Menge in kg bestätigen: Menge bei „Nachgefüllte Salzmenge“ "
-            "(Gerät „{name}“) eingeben und Taste „Salz nachgefüllt“ drücken, bei vollem Behälter genügt die Taste "
-            "„Behälter voll“, oder Dienst `water_softener_refill_sensor.refill` mit `kg` aufrufen. Diese Meldung bleibt bestehen, bis eine Menge bestätigt wurde und der Bestand wieder über der "
-            "Warnschwelle liegt."
-        ),
-        "one": "Regeneration",
-        "many": "Regenerationen",
-        "overdue_title": "Regeneration überfällig",
-        "overdue_message": (
-            "Bei der Enthärtungsanlage „{name}“ wurde seit mehr als 7 Tagen keine Regeneration erkannt "
-            "(letzte erkannte Regeneration: {last}). Die Anlage regeneriert spätestens nach 7 Tagen.\n\n"
-            "Mögliche Ursachen: Die smarte Steckdose war im Zeitfenster nicht verfügbar, die Schwellwerte wurden nicht erreicht, oder die Anlage ist gestört. "
-            "Eine tatsächlich erfolgte Regeneration lässt sich mit dem Dienst `water_softener_refill_sensor.add_regeneration` nachtragen. "
-            "Diese Meldung verschwindet, sobald wieder eine Regeneration gezählt wird."
-        ),
-    },
-    "en": {
-        "title": "Refill salt",
-        "message": (
-            "The calculated salt stock of the water softener “{name}” only lasts for {left} more {unit} "
-            "({stock} kg of {capacity} kg).\n\n"
-            "Please refill salt and confirm the amount in kg: enter it at “Salt amount refilled” (device “{name}”) "
-            "and press the button “Salt refilled”, press “Tank full” if the tank is full, or call the service `water_softener_refill_sensor.refill` with `kg`. This notice "
-            "stays until an amount is confirmed and the stock is above the warning threshold again."
-        ),
-        "one": "regeneration",
-        "many": "regenerations",
-        "overdue_title": "Regeneration overdue",
-        "overdue_message": (
-            "No regeneration has been detected for the water softener “{name}” for more than 7 days "
-            "(last detected regeneration: {last}). The softener regenerates at the latest after 7 days.\n\n"
-            "Possible causes: the smart plug was unavailable during the time window, thresholds were not reached, or the softener is faulty. "
-            "A regeneration that did take place can be added with the service `water_softener_refill_sensor.add_regeneration`. "
-            "This notice disappears as soon as a regeneration is counted again."
-        ),
-    },
-}
-
 
 def settings_from_entry(entry: ConfigEntry) -> Settings:
     """Build Settings dataclass from config entry data and options."""
     cfg = {**entry.data, **entry.options}
+    start = cfg.get(CONF_WINDOW_START)
+    end = cfg.get(CONF_WINDOW_END)
+    start_hour = int(start) if start is not None and str(start).strip() != "" else None
+    end_hour = int(end) if end is not None and str(end).strip() != "" else None
+
     return Settings(
         capacity_kg=float(cfg.get(CONF_CAPACITY_KG, DEFAULT_CAPACITY_KG)),
         per_regen_kg=float(cfg.get(CONF_PER_REGEN_KG, DEFAULT_PER_REGEN_KG)),
         power_threshold_w=float(cfg.get(CONF_POWER_THRESHOLD_W, DEFAULT_POWER_THRESHOLD_W)),
         energy_threshold_kwh=float(cfg.get(CONF_ENERGY_THRESHOLD_KWH, DEFAULT_ENERGY_THRESHOLD_KWH)),
         detection_mode=str(cfg.get(CONF_DETECTION_MODE, DEFAULT_DETECTION_MODE)),
-        start_hour=int(cfg.get(CONF_WINDOW_START, DEFAULT_WINDOW_START)),
-        end_hour=int(cfg.get(CONF_WINDOW_END, DEFAULT_WINDOW_END)),
+        start_hour=start_hour,
+        end_hour=end_hour,
         warn_remaining=int(cfg.get(CONF_WARN_REMAINING, DEFAULT_WARN_REMAINING)),
     )
 
@@ -164,11 +120,13 @@ class SoftenerManager:
         self._unsubs.append(
             async_track_state_change_event(self.hass, [self.energy_entity], self._handle_energy_state_event)
         )
+
+        eval_hour = 0 if self.settings.is_24h else (self.settings.end_hour or 0)
         self._unsubs.append(
             async_track_time_change(
                 self.hass,
                 self._handle_window_end,
-                hour=self.settings.end_hour,
+                hour=eval_hour,
                 minute=int(EVAL_DELAY.total_seconds() // 60),
                 second=0,
             )
@@ -184,7 +142,6 @@ class SoftenerManager:
             self._process_power_state(cur_power, now)
 
         self._publish()
-        self._update_notification()
         self._save_later()
 
     async def async_stop(self) -> None:
@@ -220,7 +177,6 @@ class SoftenerManager:
         events = self.model.on_power(watts, now)
         if events:
             self._log_events(events)
-            self._update_notification()
 
     @callback
     def _handle_power_state_event(self, event: Event) -> None:
@@ -258,7 +214,6 @@ class SoftenerManager:
         self._need_baseline = False
         if events:
             self._log_events(events)
-            self._update_notification()
 
     @callback
     def _handle_energy_state_event(self, event: Event) -> None:
@@ -272,11 +227,10 @@ class SoftenerManager:
     # ------------------------------------------------------------------ Window closing
     @callback
     def _handle_window_end(self, now: datetime) -> None:
-        """Scheduled evaluation 1 minute after the end of the time window."""
+        """Scheduled evaluation at end of time window or end of day."""
         events = self.model.evaluate_pending(dt_util.as_local(now), scheduled=True)
         if events:
             self._log_events(events)
-        self._update_notification()
         self._publish()
         self._save_later()
 
@@ -350,49 +304,8 @@ class SoftenerManager:
         self._after_manual_change()
 
     def _after_manual_change(self) -> None:
-        self._update_notification()
         self._publish()
         self._save_later()
-
-    # ------------------------------------------------------------------ Notifications
-    def _update_notification(self) -> None:
-        lang = "de" if str(self.hass.config.language).lower().startswith("de") else "en"
-        texts = MESSAGES[lang]
-        self._update_overdue_notification(texts)
-        nid = notification_id(self.entry.entry_id)
-        if not self.model.needs_refill:
-            persistent_notification.async_dismiss(self.hass, nid)
-            return
-        left = self.model.remaining_regens
-        persistent_notification.async_create(
-            self.hass,
-            texts["message"].format(
-                name=self.entry.title,
-                left=left,
-                unit=texts["one"] if left == 1 else texts["many"],
-                stock=f"{self.model.state.stock_kg:.1f}",
-                capacity=f"{self.settings.capacity_kg:.1f}",
-            ),
-            title=texts["title"],
-            notification_id=nid,
-        )
-
-    def _update_overdue_notification(self, texts: dict[str, Any]) -> None:
-        nid = overdue_notification_id(self.entry.entry_id)
-        now = dt_util.now()
-        if not self.model.regen_overdue(now):
-            persistent_notification.async_dismiss(self.hass, nid)
-            return
-        last = self.model.state.last_regen_at
-        persistent_notification.async_create(
-            self.hass,
-            texts["overdue_message"].format(
-                name=self.entry.title,
-                last=dt_util.as_local(last).strftime("%d.%m.%Y %H:%M") if last else "–",
-            ),
-            title=texts["overdue_title"],
-            notification_id=nid,
-        )
 
     # ------------------------------------------------------------------ Coordinator data
     def snapshot(self) -> dict[str, Any]:
@@ -420,6 +333,9 @@ class SoftenerManager:
             "power_threshold_w": self.settings.power_threshold_w,
             "energy_threshold_kwh": self.settings.energy_threshold_kwh,
             "detection_mode": self.settings.detection_mode,
+            "window_start_hour": self.settings.start_hour,
+            "window_end_hour": self.settings.end_hour,
+            "is_24h": self.settings.is_24h,
         }
 
     def _publish(self) -> None:

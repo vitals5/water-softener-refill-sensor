@@ -39,8 +39,6 @@ from .const import (
     DEFAULT_PER_REGEN_KG,
     DEFAULT_POWER_THRESHOLD_W,
     DEFAULT_WARN_REMAINING,
-    DEFAULT_WINDOW_END,
-    DEFAULT_WINDOW_START,
     DETECTION_MODES,
     DOMAIN,
 )
@@ -99,14 +97,24 @@ def _schema(first_setup: bool, defaults: dict[str, Any]) -> vol.Schema:
     )
 
     if first_setup:
-        fields[vol.Optional(CONF_INITIAL_STOCK_KG)] = _number(0, 1000, 0.5, "kg")
+        init_stock = defaults.get(CONF_INITIAL_STOCK_KG)
+        if init_stock is not None:
+            fields[vol.Optional(CONF_INITIAL_STOCK_KG, default=init_stock)] = _number(0, 1000, 0.5, "kg")
+        else:
+            fields[vol.Optional(CONF_INITIAL_STOCK_KG)] = _number(0, 1000, 0.5, "kg")
 
-    fields[vol.Required(CONF_WINDOW_START, default=defaults.get(CONF_WINDOW_START, DEFAULT_WINDOW_START))] = _number(
-        0, 22, 1, "h"
-    )
-    fields[vol.Required(CONF_WINDOW_END, default=defaults.get(CONF_WINDOW_END, DEFAULT_WINDOW_END))] = _number(
-        1, 23, 1, "h"
-    )
+    start_val = defaults.get(CONF_WINDOW_START)
+    if start_val is not None:
+        fields[vol.Optional(CONF_WINDOW_START, default=start_val)] = _number(0, 23, 1, "h")
+    else:
+        fields[vol.Optional(CONF_WINDOW_START)] = _number(0, 23, 1, "h")
+
+    end_val = defaults.get(CONF_WINDOW_END)
+    if end_val is not None:
+        fields[vol.Optional(CONF_WINDOW_END, default=end_val)] = _number(1, 24, 1, "h")
+    else:
+        fields[vol.Optional(CONF_WINDOW_END)] = _number(1, 24, 1, "h")
+
     fields[vol.Required(CONF_WARN_REMAINING, default=defaults.get(CONF_WARN_REMAINING, DEFAULT_WARN_REMAINING))] = (
         _number(0, 100, 1)
     )
@@ -116,12 +124,22 @@ def _schema(first_setup: bool, defaults: dict[str, Any]) -> vol.Schema:
 
 def _normalize(user_input: dict[str, Any]) -> dict[str, Any]:
     data = dict(user_input)
-    for key in (CONF_WINDOW_START, CONF_WINDOW_END, CONF_WARN_REMAINING):
-        if key in data:
-            data[key] = int(round(float(data[key])))
+    if CONF_WARN_REMAINING in data:
+        data[CONF_WARN_REMAINING] = int(round(float(data[CONF_WARN_REMAINING])))
+
+    for key in (CONF_WINDOW_START, CONF_WINDOW_END):
+        val = data.get(key)
+        if val is not None and str(val).strip() != "":
+            data[key] = int(round(float(val)))
+        else:
+            data[key] = None
+
     for key in (CONF_POWER_THRESHOLD_W, CONF_ENERGY_THRESHOLD_KWH, CONF_CAPACITY_KG, CONF_PER_REGEN_KG, CONF_INITIAL_STOCK_KG):
-        if key in data and data[key] is not None:
+        if key in data and data[key] is not None and str(data[key]).strip() != "":
             data[key] = float(data[key])
+        elif key == CONF_INITIAL_STOCK_KG:
+            data[key] = None
+
     if CONF_DETECTION_MODE in data:
         data[CONF_DETECTION_MODE] = str(data[CONF_DETECTION_MODE])
     return data
@@ -129,7 +147,11 @@ def _normalize(user_input: dict[str, Any]) -> dict[str, Any]:
 
 def _validate(data: dict[str, Any]) -> dict[str, str]:
     errors: dict[str, str] = {}
-    if data[CONF_WINDOW_START] >= data[CONF_WINDOW_END]:
+    start = data.get(CONF_WINDOW_START)
+    end = data.get(CONF_WINDOW_END)
+    if (start is not None and end is None) or (start is None and end is not None):
+        errors["base"] = "window_incomplete"
+    elif start is not None and end is not None and start >= end:
         errors["base"] = "window_invalid"
     elif data[CONF_PER_REGEN_KG] > data[CONF_CAPACITY_KG]:
         errors["base"] = "per_regen_too_large"

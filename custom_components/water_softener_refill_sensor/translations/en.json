@@ -22,18 +22,19 @@
           "power_entity": "Sensor reporting active power in Watts [W] from your smart plug.",
           "energy_entity": "Sensor reporting cumulative energy consumption in kWh or Wh from your smart plug.",
           "power_threshold_w": "Power in Watts [W] above which the regeneration motor is considered active.",
-          "energy_threshold_kwh": "Energy in kWh consumed in the time window required to detect a regeneration.",
+          "energy_threshold_kwh": "Energy in kWh consumed required to detect a regeneration.",
           "detection_mode": "Criterion to identify a regeneration: energy, power, both, or either.",
           "capacity_kg": "How many kilograms of salt fit into the brine tank?",
           "per_regen_kg": "How many kilograms of salt does one regeneration cycle use?",
           "initial_stock_kg": "Optional. Leave empty if the tank is full right now.",
-          "window_start_hour": "Start of the time window in which the regeneration takes place (default 2 am).",
-          "window_end_hour": "End of the time window (default 3 am). Must be after the start.",
-          "warn_remaining": "From this calculated remaining stock on, a notice is shown until the refill is confirmed."
+          "window_start_hour": "Start of the time window (optional, leave empty for 24-hour monitoring).",
+          "window_end_hour": "End of the time window (optional, leave empty for 24-hour monitoring).",
+          "warn_remaining": "From this calculated remaining stock on, the 'Refill salt' problem sensor turns on."
         }
       }
     },
     "error": {
+      "window_incomplete": "Please specify both start and end hours, or leave both empty for full 24-hour monitoring.",
       "window_invalid": "The end of the time window must be after its start.",
       "per_regen_too_large": "Salt per regeneration must not exceed the tank capacity.",
       "stock_too_large": "The current salt stock must not exceed the tank capacity.",
@@ -56,10 +57,23 @@
           "window_start_hour": "Time window from (hour)",
           "window_end_hour": "Time window to (hour)",
           "warn_remaining": "Warn at remaining stock of (regenerations)"
+        },
+        "data_description": {
+          "power_entity": "Sensor reporting active power in Watts [W] from your smart plug.",
+          "energy_entity": "Sensor reporting cumulative energy consumption in kWh or Wh from your smart plug.",
+          "power_threshold_w": "Power in Watts [W] above which the regeneration motor is considered active.",
+          "energy_threshold_kwh": "Energy in kWh consumed required to detect a regeneration.",
+          "detection_mode": "Criterion to identify a regeneration: energy, power, both, or either.",
+          "capacity_kg": "How many kilograms of salt fit into the brine tank?",
+          "per_regen_kg": "How many kilograms of salt does one regeneration cycle use?",
+          "window_start_hour": "Start of the time window (optional, leave empty for 24-hour monitoring).",
+          "window_end_hour": "End of the time window (optional, leave empty for 24-hour monitoring).",
+          "warn_remaining": "From this calculated remaining stock on, the 'Refill salt' problem sensor turns on."
         }
       }
     },
     "error": {
+      "window_incomplete": "Please specify both start and end hours, or leave both empty for full 24-hour monitoring.",
       "window_invalid": "The end of the time window must be after its start.",
       "per_regen_too_large": "Salt per regeneration must not exceed the tank capacity.",
       "stock_too_large": "The current salt stock must not exceed the tank capacity.",
@@ -149,7 +163,7 @@
   "services": {
     "refill": {
       "name": "Salt refilled",
-      "description": "Confirms that salt was refilled. The amount in kg is required and is added to the stock (at most up to full). The notice ends once the stock is above the warning threshold again.",
+      "description": "Confirms that salt was refilled. The amount in kg is required and is added to the stock (at most up to full). The 'Refill salt' sensor turns off once the stock is above the warning threshold.",
       "fields": {
         "config_entry": {
           "name": "Water softener",
@@ -191,7 +205,7 @@
     },
     "set_last_regeneration": {
       "name": "Set last regeneration",
-      "description": "Sets the time of the last regeneration (e.g. from the softener's display). Determines “Next regeneration at the latest” and the “Regeneration overdue” notice. Counters and salt stock stay unchanged.",
+      "description": "Sets the time of the last regeneration (e.g. from the softener's display). Determines 'Next regeneration at the latest' and the 'Regeneration overdue' status. Counters and salt stock stay unchanged.",
       "fields": {
         "config_entry": {
           "name": "Water softener",

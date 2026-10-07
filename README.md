@@ -5,9 +5,9 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![Validate Integration](https://github.com/vitals5/water-softener-refill-sensor/actions/workflows/validate.yml/badge.svg)](https://github.com/vitals5/water-softener-refill-sensor/actions/workflows/validate.yml)
 
-A custom Home Assistant integration that monitors **water softener regenerations** and tracks **salt levels** using a **smart plug with power [W] and energy [kWh] metering**. It automatically notifies you when salt needs to be refilled.
+A custom Home Assistant integration that monitors **water softener regenerations** and tracks **salt levels** using a **smart plug with power [W] and energy [kWh] metering**. It provides dedicated problem and running binary sensors to alert you when salt needs to be refilled.
 
-Supports **multiple water softener instances**, full **UI configuration via Config Flow & Options Flow**, and is **multilingual** (English & German).
+Supports **multiple water softener instances**, full **UI configuration via Config Flow & Options Flow**, optional **24h continuous monitoring**, and is **multilingual** (English & German).
 
 ---
 
@@ -26,16 +26,18 @@ By plugging your water softener into a smart plug (e.g. Shelly, Zigbee plug, Tap
 ## How It Works
 
 ### 1. Regeneration Detection
-- **Time Window:** Water softeners typically regenerate during nighttime hours (default: **02:00 to 03:00 AM**). You can adjust this window to match your softener's schedule.
+- **Time Window (Optional):**
+  - **24h Continuous Monitoring (Default):** If left blank, the integration monitors power and energy around the clock. Whenever a regeneration cycle completes (power drops back to standby for 30 minutes), exactly one regeneration is recorded.
+  - **Scheduled Window:** Alternatively, define a specific hour range (e.g. **02:00 to 03:00 AM**) if your softener is configured for a fixed nighttime schedule. Evaluation finalizes 1 minute after window end.
 - **Power & Energy Monitoring:**
   - **Power [W]:** Real-time active power monitoring provides an instant `Regeneration active` binary sensor whenever the valve motor runs.
-  - **Energy [kWh]:** Cumulative energy consumption during the time window is tracked.
+  - **Energy [kWh]:** Cumulative energy consumption during the cycle/window is tracked.
 - **Flexible Detection Modes:**
   - `Energy or power threshold (either)` *(Default / Recommended)*: Detects regeneration if either energy consumed in the window or peak power exceeds threshold.
   - `Both power and energy thresholds`: Requires both peak power and window energy consumption to cross thresholds (extra protection against anomalies).
   - `Energy threshold only`: Detects solely based on energy consumed in the time window (in kWh/Wh).
   - `Power threshold only`: Detects solely based on peak power reached in the time window.
-- **Window Finalization:** Evaluated 1 minute after the time window ends. If the criteria are met, exactly **one regeneration cycle** is recorded.
+- **Cycle Finalization:** When criteria are met, exactly **one regeneration cycle** is recorded.
 
 ### 2. Salt Stock Calculation
 - You configure your brine tank capacity (e.g. 25 kg) and salt used per regeneration (e.g. 1.28 kg).
@@ -43,11 +45,11 @@ By plugging your water softener into a smart plug (e.g. Shelly, Zigbee plug, Tap
 - The remaining regeneration count and salt level percentage are updated in real time.
 
 ### 3. Warnings & Refill Confirmation
-- **Low Salt Warning:** When the calculated remaining regenerations drop to or below the warning threshold (default: **3 regenerations**), a persistent notification and problem binary sensor appear.
+- **Low Salt Warning:** When calculated remaining regenerations drop to or below the warning threshold (default: **3 regenerations**), the `Refill salt` (`refill_needed`) binary sensor turns `ON`. (No intrusive persistent notifications are generated — automate alerts your way using standard HA notifications).
 - **Confirming Refill:**
   - **Single Button Full:** If you filled the tank to capacity, simply press the `Tank full` button.
   - **Partial Refill:** Enter the refilled amount in `Salt amount refilled` (kg) and press `Salt refilled` (or call `refill` service). The amount is added to stock up to the tank capacity.
-- **7-Day Hygiene Rule:** Water softeners typically perform a mandatory hygiene regeneration at least every 7 days, even without water demand. The integration calculates `Next regeneration at the latest`. If 7 days pass without a detected regeneration, a `Regeneration overdue` warning is raised.
+- **7-Day Hygiene Rule:** Water softeners typically perform a mandatory hygiene regeneration at least every 7 days, even without water demand. The integration calculates `Next regeneration at the latest`. If 7 days pass without a detected regeneration, a `Regeneration overdue` warning binary sensor turns `ON`.
 
 ---
 
@@ -88,7 +90,7 @@ Navigate to **Settings → Devices & Services → Add Integration** and search f
 | **Brine tank capacity** | Total salt capacity of the tank in kg | `25.0 kg` |
 | **Salt per regeneration** | Salt consumed per regeneration cycle in kg | `1.28 kg` |
 | **Current salt stock** | Optional initial stock on first setup. Leave empty if tank is full | *Full tank* |
-| **Time window from / to** | Time window when regeneration takes place (hours) | `2 to 3 (AM)` |
+| **Time window from / to** | Time window when regeneration takes place (hours). **Optional: leave empty for full 24h continuous monitoring** | *Empty (24h continuous)* |
 | **Warn at remaining stock** | Warning threshold in remaining regenerations | `3` |
 
 ### Changing Settings Later (Options Flow)
@@ -187,7 +189,7 @@ data:
 
 ## Multiple Water Softener Instances
 
-You can set up multiple water softeners in the same Home Assistant instance. Each instance runs completely independently with its own settings, entities, persistent storage, and notifications.
+You can set up multiple water softeners in the same Home Assistant instance. Each instance runs completely independently with its own settings, entities, and persistent storage.
 
 When calling services from automations:
 - If only one water softener is configured, the `config_entry` parameter is optional.
@@ -273,8 +275,8 @@ Run the test suite:
 python3 -m unittest discover -s tests -v
 ```
 
-- `tests/test_logic.py`: Verifies threshold evaluation, power/energy detection modes, hygiene rule, and clamping.
-- `tests/test_integration_smoke.py`: Simulates Home Assistant state change events, coordinator updates, notifications, service calls, and restarts.
+- `tests/test_logic.py`: Verifies threshold evaluation, power/energy detection modes, 24h continuous monitoring, hygiene rule, and clamping.
+- `tests/test_integration_smoke.py`: Simulates Home Assistant state change events, coordinator updates, binary sensors, service calls, and restarts.
 
 ---
 

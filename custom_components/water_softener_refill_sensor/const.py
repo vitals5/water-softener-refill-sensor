@@ -22,8 +22,8 @@ DEFAULT_ENERGY_THRESHOLD_KWH = 0.015
 DEFAULT_DETECTION_MODE = "energy_or_power"
 DEFAULT_CAPACITY_KG = 25.0
 DEFAULT_PER_REGEN_KG = 1.28
-DEFAULT_WINDOW_START = 2
-DEFAULT_WINDOW_END = 3
+DEFAULT_WINDOW_START = None  # None = full 24h
+DEFAULT_WINDOW_END = None    # None = full 24h
 DEFAULT_WARN_REMAINING = 3
 
 MODE_ENERGY_OR_POWER = "energy_or_power"
@@ -56,13 +56,3 @@ SAVE_DELAY = 30  # seconds
 def storage_key(entry_id: str) -> str:
     """Generate storage key for a config entry."""
     return f"{DOMAIN}.{entry_id}"
-
-
-def notification_id(entry_id: str) -> str:
-    """Generate notification ID for low salt alert."""
-    return f"{DOMAIN}_{entry_id}_low_salt"
-
-
-def overdue_notification_id(entry_id: str) -> str:
-    """Generate notification ID for overdue regeneration alert."""
-    return f"{DOMAIN}_{entry_id}_overdue"

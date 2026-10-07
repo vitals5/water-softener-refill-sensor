@@ -7,12 +7,13 @@ Working principle:
 -----------------
 * A smart plug with power measurement (instantaneous [W]) and energy measurement (cumulative [kWh])
   is attached to the water softener.
-* Softeners typically regenerate during a scheduled night time window (default: 02:00 to 03:00).
-* During regeneration, the motor/valve mechanisms draw active power (e.g. 5–30+ W) and accumulate
+* The time window is optional:
+  - If no window is configured, detection runs 24/7 (full 24h).
+  - If a time window is configured (e.g. 02:00 to 03:00), monitoring and evaluation are restricted to that window.
+* During regeneration, the motorized valve cycles, drawing active power (e.g. 5–30+ W) and accumulating
   electrical energy (e.g. 0.015–0.05+ kWh).
 * Active power [W] also provides a real-time binary sensor indicating whether a regeneration is currently in progress.
-* One minute after the time window closes, the window is finalized: if the energy consumption or power drawn
-  exceeds the configured threshold(s), one regeneration cycle is counted.
+* When criteria are met (and finalized at window end or upon cycle completion), one regeneration cycle is counted.
 * Each regeneration reduces the calculated salt stock by a configurable amount.
 * Refilling salt updates the stock and resets warning states.
 """
@@ -30,8 +31,6 @@ from .const import (
     DEFAULT_PER_REGEN_KG,
     DEFAULT_POWER_THRESHOLD_W,
     DEFAULT_WARN_REMAINING,
-    DEFAULT_WINDOW_END,
-    DEFAULT_WINDOW_START,
     MODE_BOTH,
     MODE_ENERGY_ONLY,
     MODE_ENERGY_OR_POWER,
@@ -39,6 +38,7 @@ from .const import (
 )
 
 EVAL_DELAY = timedelta(minutes=1)
+CYCLE_COOLDOWN = timedelta(minutes=30)
 HYGIENE_DAYS = 7
 HISTORY_LENGTH = 10
 
@@ -52,9 +52,14 @@ class Settings:
     power_threshold_w: float = DEFAULT_POWER_THRESHOLD_W
     energy_threshold_kwh: float = DEFAULT_ENERGY_THRESHOLD_KWH
     detection_mode: str = DEFAULT_DETECTION_MODE
-    start_hour: int = DEFAULT_WINDOW_START
-    end_hour: int = DEFAULT_WINDOW_END
+    start_hour: int | None = None
+    end_hour: int | None = None
     warn_remaining: int = DEFAULT_WARN_REMAINING
+
+    @property
+    def is_24h(self) -> bool:
+        """True if running in full 24h mode (no specific window set)."""
+        return self.start_hour is None or self.end_hour is None
 
 
 @dataclass
@@ -109,13 +114,20 @@ class SoftenerModel:
         return max(0.0, min(float(kg), float(self.settings.capacity_kg)))
 
     def window_start(self, day: date, tz: Any) -> datetime:
-        return datetime.combine(day, time(self.settings.start_hour, 0), tzinfo=tz)
+        start_h = 0 if self.settings.is_24h else (self.settings.start_hour or 0)
+        return datetime.combine(day, time(start_h, 0), tzinfo=tz)
 
     def window_end(self, day: date, tz: Any) -> datetime:
         """End of detection window + evaluation delay."""
-        return datetime.combine(day, time(self.settings.end_hour, 0), tzinfo=tz) + EVAL_DELAY
+        if self.settings.is_24h:
+            next_day = day + timedelta(days=1)
+            return datetime.combine(next_day, time(0, 0), tzinfo=tz) + EVAL_DELAY
+        end_h = self.settings.end_hour or 23
+        return datetime.combine(day, time(end_h, 0), tzinfo=tz) + EVAL_DELAY
 
     def in_window(self, now: datetime) -> bool:
+        if self.settings.is_24h:
+            return True
         day = now.date()
         return self.window_start(day, now.tzinfo) <= now < self.window_end(day, now.tzinfo)
 
@@ -184,6 +196,8 @@ class SoftenerModel:
         if self.in_window(now):
             day = now.date()
             if st.window_date != day:
+                if st.window_date is not None and st.evaluated_date != st.window_date:
+                    events.extend(self._finalize(st.window_date, now.tzinfo))
                 st.window_date = day
                 st.window_energy_kwh = 0.0
                 st.window_max_power_w = st.current_power_w
@@ -196,14 +210,13 @@ class SoftenerModel:
             ):
                 st.window_crossed_at = now
 
+            # In 24h mode, check for cycle completion once power drops back to standby
+            events.extend(self._check_24h_cycle_completion(now))
+
         return events
 
     def on_energy(self, energy_kwh: float, now: datetime, baseline_only: bool = False) -> list[dict[str, Any]]:
-        """Process cumulative energy reading in kilowatt-hours [kWh].
-
-        baseline_only=True initializes the baseline reference without accumulating delta,
-        preventing gaps after HA restarts or temporary sensor unavailability from counting as usage.
-        """
+        """Process cumulative energy reading in kilowatt-hours [kWh]."""
         events = self.evaluate_pending(now)
         st = self.state
         prev = st.last_energy_kwh
@@ -219,6 +232,8 @@ class SoftenerModel:
         if self.in_window(now):
             day = now.date()
             if st.window_date != day:
+                if st.window_date is not None and st.evaluated_date != st.window_date:
+                    events.extend(self._finalize(st.window_date, now.tzinfo))
                 st.window_date = day
                 st.window_energy_kwh = 0.0
                 st.window_max_power_w = st.current_power_w
@@ -230,17 +245,35 @@ class SoftenerModel:
             ):
                 st.window_crossed_at = now
 
+            events.extend(self._check_24h_cycle_completion(now))
+
         return events
+
+    def _check_24h_cycle_completion(self, now: datetime) -> list[dict[str, Any]]:
+        """In 24h mode, finalize cycle after power returns to standby and cooldown passes."""
+        st = self.state
+        day = now.date()
+        if (
+            self.settings.is_24h
+            and st.window_crossed_at is not None
+            and st.evaluated_date != day
+            and st.current_power_w < self.settings.power_threshold_w
+            and now >= st.window_crossed_at + CYCLE_COOLDOWN
+        ):
+            return self._finalize(day, now.tzinfo)
+        return []
 
     # ------------------------------------------------------------------ Window finalization
     def evaluate_pending(self, now: datetime, scheduled: bool = False) -> list[dict[str, Any]]:
-        """Finalize an ended time window that has not yet been evaluated."""
+        """Finalize an ended time window or day that has not yet been evaluated."""
         st = self.state
         today = now.date()
         wd = st.window_date
 
         if wd is not None and st.evaluated_date != wd:
             if now >= self.window_end(wd, now.tzinfo):
+                return self._finalize(wd, now.tzinfo)
+            if scheduled and self.check_threshold_reached(st.window_energy_kwh, st.window_max_power_w):
                 return self._finalize(wd, now.tzinfo)
             return []
 
@@ -295,12 +328,7 @@ class SoftenerModel:
             self._register(at)
 
     def refill(self, now: datetime, kg: float) -> float:
-        """Confirm salt refill with given kg (must be > 0).
-
-        Added to current stock up to tank capacity.
-        If tank is full after refill, regens_since_refill resets to 0.
-        Returns the amount effectively added.
-        """
+        """Confirm salt refill with given kg (must be > 0)."""
         if kg is None or not float(kg) > 0:
             raise ValueError("Refill amount must be greater than 0 kg.")
         st = self.state

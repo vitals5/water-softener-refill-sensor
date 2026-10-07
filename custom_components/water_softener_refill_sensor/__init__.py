@@ -8,7 +8,6 @@ import logging
 
 import voluptuous as vol
 
-from homeassistant.components import persistent_notification
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant, ServiceCall
 from homeassistant.exceptions import ServiceValidationError
@@ -28,8 +27,6 @@ from .const import (
     SERVICE_SET_REGENS_SINCE_REFILL,
     SERVICE_SET_STOCK,
     STORAGE_VERSION,
-    notification_id,
-    overdue_notification_id,
     storage_key,
 )
 from .manager import SoftenerManager
@@ -110,9 +107,7 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 
 
 async def async_remove_entry(hass: HomeAssistant, entry: ConfigEntry) -> None:
-    """Dismiss notifications and clean up storage on entry removal."""
-    persistent_notification.async_dismiss(hass, notification_id(entry.entry_id))
-    persistent_notification.async_dismiss(hass, overdue_notification_id(entry.entry_id))
+    """Clean up storage on entry removal."""
     await Store(hass, STORAGE_VERSION, storage_key(entry.entry_id)).async_remove()
 
 

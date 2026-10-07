@@ -138,6 +138,27 @@ class RegenerationDetectionTests(unittest.TestCase):
         events = self.model.evaluate_pending(_dt(6, 3, 1), scheduled=True)
         self.assertNotIn("regeneration", [e["type"] for e in events])
 
+    def test_24h_mode_detection_during_day(self) -> None:
+        self.settings.start_hour = None
+        self.settings.end_hour = None
+        self.assertTrue(self.settings.is_24h)
+        model = SoftenerModel(self.settings)
+
+        # Baseline morning
+        model.on_energy(200.0, _dt(6, 8, 0))
+
+        # Regeneration happens at 14:00
+        model.on_power(1.2, _dt(6, 14, 0))
+        model.on_power(22.0, _dt(6, 14, 5))
+        model.on_energy(200.035, _dt(6, 14, 25))
+
+        # Motor completes and cooldown elapses at 14:45 (> 30 min after 14:05)
+        events = model.on_power(1.1, _dt(6, 14, 45))
+        types = [e["type"] for e in events]
+        self.assertIn("regeneration", types)
+        self.assertEqual(model.state.total_regens, 1)
+        self.assertEqual(model.state.last_regen_at, _dt(6, 14, 5))
+
     def test_state_roundtrip(self) -> None:
         self.model.state.total_regens = 5
         self.model.state.stock_kg = 18.5
