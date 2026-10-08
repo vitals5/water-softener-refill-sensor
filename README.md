@@ -10,7 +10,7 @@
 
 [![hacs_badge](https://img.shields.io/badge/HACS-Custom-41BDF5.svg)](https://github.com/hacs/default)
 [![GitHub Release](https://img.shields.io/github/v/release/vitals5/water-softener-refill-sensor)](https://github.com/vitals5/water-softener-refill-sensor/releases)
-[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
+[![License: AGPL v3](https://img.shields.io/badge/License-AGPL_v3-blue.svg)](https://www.gnu.org/licenses/agpl-3.0)
 [![Validate Integration](https://github.com/vitals5/water-softener-refill-sensor/actions/workflows/validate.yml/badge.svg)](https://github.com/vitals5/water-softener-refill-sensor/actions/workflows/validate.yml)
 
 A custom Home Assistant integration that monitors **water softener regenerations** and tracks **salt levels** using a **smart plug with power [W] and energy [kWh] metering**. It provides dedicated problem and running binary sensors to alert you when salt needs to be refilled.
@@ -292,4 +292,4 @@ python3 -m unittest discover -s tests -v
 
 ## License
 
-This project is licensed under the [MIT License](LICENSE).
+This project is licensed under the [GNU Affero General Public License v3.0](LICENSE) (AGPL-3.0).
